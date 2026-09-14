@@ -1587,6 +1587,47 @@ textarea {
 textarea::placeholder {
   color: #a4adbb;
 }
+.customer-picker {
+  position: relative;
+}
+.customer-suggestions {
+  position: absolute;
+  z-index: 2;
+  top: calc(100% + 4px);
+  inset-inline: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: #fff;
+  border: 1px solid #e1e5ec;
+  border-radius: 5px;
+  box-shadow: 0 6px 18px #282c3514;
+}
+.customer-suggestions button {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.customer-suggestions button:hover,
+.customer-suggestions button[aria-selected="true"] {
+  background: #eef1f8;
+}
+.customer-suggestion-id {
+  color: #7b8799;
+  flex-shrink: 0;
+}
+.customer-no-results {
+  padding: 12px;
+  color: #7b8799;
+  font-size: 11px;
+}
 .full-width {
   width: 100%;
   margin-top: 10px;

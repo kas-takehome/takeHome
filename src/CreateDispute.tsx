@@ -12,6 +12,7 @@ import {
 import { api } from "./api";
 import { Select } from "./components";
 import Modal from "./Modal";
+import CustomerPicker from "./CustomerPicker";
 
 export default function CreateDispute({
   agentOptions,
@@ -58,6 +59,14 @@ export default function CreateDispute({
     event.preventDefault();
     if (busy || !customers?.length) return;
     setError("");
+    if (
+      !customers.some(
+        (customer) => String(customer.customer_id) === form.customer_id,
+      )
+    ) {
+      setError("Choose an existing customer from the suggestions.");
+      return;
+    }
     if (!/^(?:\d+|\d*\.\d{1,2})$/.test(form.amount)) {
       setError("Enter an amount with no more than two decimal places.");
       return;
@@ -131,28 +140,21 @@ export default function CreateDispute({
             <label className="field-label" htmlFor="create-customer">
               Customer
             </label>
-            <Select
-              className="full-select"
+            <CustomerPicker
               id="create-customer"
+              customers={customers ?? []}
               value={form.customer_id}
-              onChange={(event) => setField("customer_id", event.target.value)}
-              disabled={!customers?.length}
-              aria-busy={customers === null && !customerError}
-              required
-            >
-              <option value="" disabled>
-                {customerError
+              onChange={(value) => setField("customer_id", value)}
+              disabled={busy || !customers?.length}
+              loading={customers === null && !customerError}
+              placeholder={
+                customerError
                   ? "Customers unavailable"
                   : customers === null
                     ? "Loading customers…"
-                    : "Choose a customer"}
-              </option>
-              {customers?.map((customer) => (
-                <option key={customer.customer_id} value={customer.customer_id}>
-                  {customer.customer_name} · #{customer.customer_id}
-                </option>
-              ))}
-            </Select>
+                    : "Search customers by name or ID…"
+              }
+            />
           </div>
           <div>
             <label className="field-label" htmlFor="create-reason">
