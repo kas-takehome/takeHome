@@ -41,11 +41,13 @@ export const reasonLabels: Record<Reason, string> = {
   subscription_cancelled: "Subscription cancelled",
   other: "Other",
 };
-export interface Dispute {
-  id: string;
-  transaction_id: string;
-  customer_id: string;
+export interface Customer {
+  customer_id: number;
   customer_name: string;
+}
+export interface Dispute extends Customer {
+  id: string;
+  transaction_id: number;
   amount: number;
   currency: string;
   reason_code: Reason;
@@ -60,14 +62,10 @@ export interface Dispute {
 }
 export type CreateDisputeInput = Pick<
   Dispute,
-  | "transaction_id"
   | "customer_id"
-  | "customer_name"
   | "amount"
   | "currency"
   | "reason_code"
-  | "date_received"
-  | "network_deadline"
   | "assigned_agent"
   | "notes"
 >;

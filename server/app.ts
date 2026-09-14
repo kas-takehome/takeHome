@@ -29,6 +29,7 @@ import {
   reasons,
   statuses,
   urgency,
+  type Customer,
   type Dispute,
 } from "../shared/domain";
 
@@ -68,27 +69,12 @@ const updateInput = z
 const noteInput = z
   .object({ note: z.string().trim().min(1).max(4000).pipe(safeText) })
   .strict();
-const referenceInput = z
-  .string()
-  .trim()
-  .min(1)
-  .max(120)
-  .regex(/^[A-Za-z0-9_-]+$/)
-  .pipe(safeText);
-const creationDate = z
-  .string()
-  .datetime({ offset: true })
-  .transform((value) => new Date(value).toISOString());
 const createInput = z
   .object({
-    transaction_id: referenceInput,
-    customer_id: referenceInput,
-    customer_name: z.string().trim().min(1).max(120).pipe(safeText),
+    customer_id: z.number().int().positive().safe(),
     amount: z.number().int().min(1).max(999999999),
     currency: z.enum(currencies),
     reason_code: z.enum(reasons),
-    date_received: creationDate,
-    network_deadline: creationDate,
     assigned_agent: z
       .string()
       .trim()
@@ -99,15 +85,7 @@ const createInput = z
       .default(null),
     notes: z.string().trim().max(4000).pipe(safeText).default(""),
   })
-  .strict()
-  .refine(
-    (input) =>
-      Date.parse(input.network_deadline) >= Date.parse(input.date_received),
-    {
-      message: "Network deadline must be on or after the received date.",
-      path: ["network_deadline"],
-    },
-  );
+  .strict();
 const bulkInput = z
   .object({
     disputes: z
@@ -171,6 +149,14 @@ export function createApp(db: DB, identity: RequestHandler = resolveActor) {
   });
   app.get("/api/health", (_req, res) => {
     res.json({ status: "ok" });
+  });
+  app.get("/api/customers", authorize("disputes:read"), (_req, res) => {
+    const customers = db
+      .prepare(
+        "SELECT customer_id, customer_name FROM customers ORDER BY customer_name COLLATE NOCASE, customer_id",
+      )
+      .all() as Customer[];
+    res.json({ customers });
   });
   app.get("/api/disputes", authorize("disputes:read"), (req, res) => {
     const query = queueQuery.parse(req.query);

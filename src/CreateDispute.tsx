@@ -1,23 +1,17 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Plus, X } from "lucide-react";
 import {
   currencies,
   reasonLabels,
   reasons,
   type CreateDisputeInput,
+  type Customer,
   type DisputeDetail,
   type Reason,
 } from "../shared/domain";
 import { api } from "./api";
 import { Select } from "./components";
 import Modal from "./Modal";
-
-function localDateTime() {
-  const now = new Date();
-  return new Date(now.getTime() - now.getTimezoneOffset() * 60000)
-    .toISOString()
-    .slice(0, 16);
-}
 
 export default function CreateDispute({
   agentOptions,
@@ -29,25 +23,40 @@ export default function CreateDispute({
   onSuccess: (id: string) => void;
 }) {
   const [form, setForm] = useState(() => ({
-    transaction_id: "",
     customer_id: "",
-    customer_name: "",
     amount: "",
     currency: "USD",
     reason_code: "",
-    date_received: localDateTime(),
-    network_deadline: "",
     assigned_agent: "",
     notes: "",
   }));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [customers, setCustomers] = useState<Customer[] | null>(null);
+  const [customerError, setCustomerError] = useState("");
+  const [customerRevision, setCustomerRevision] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    void api<{ customers: Customer[] }>("/customers", {
+      signal: controller.signal,
+    })
+      .then((result) => {
+        if (!controller.signal.aborted) setCustomers(result.customers);
+      })
+      .catch((err: unknown) => {
+        if (!controller.signal.aborted)
+          setCustomerError(
+            err instanceof Error ? err.message : "Unable to load customers.",
+          );
+      });
+    return () => controller.abort();
+  }, [customerRevision]);
   function setField(field: keyof typeof form, value: string) {
     setForm((previous) => ({ ...previous, [field]: value }));
   }
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy) return;
+    if (busy || !customers?.length) return;
     setError("");
     if (!/^(?:\d+|\d*\.\d{1,2})$/.test(form.amount)) {
       setError("Enter an amount with no more than two decimal places.");
@@ -58,10 +67,9 @@ export default function CreateDispute({
     try {
       const input: CreateDisputeInput = {
         ...form,
+        customer_id: Number(form.customer_id),
         amount: Number(whole) * 100 + Number(fraction.padEnd(2, "0")),
         reason_code: form.reason_code as Reason,
-        date_received: new Date(form.date_received).toISOString(),
-        network_deadline: new Date(form.network_deadline).toISOString(),
         assigned_agent: form.assigned_agent || null,
       };
       const result = await api<DisputeDetail>("/disputes", {
@@ -93,41 +101,59 @@ export default function CreateDispute({
       </button>
       <h2 id="create-title">Add dispute</h2>
       <p>
-        Create a case with status New. Its ID and mock risk score are generated
-        automatically. Use synthetic data only.
+        Select an existing synthetic customer. The transaction ID and received
+        time are generated when you add the case; the deadline is seven days
+        later.
       </p>
       <form onSubmit={(event) => void submit(event)}>
+        {customerError && (
+          <div className="error-banner" role="alert">
+            <span>Unable to load customers. {customerError}</span>
+            <button
+              type="button"
+              onClick={() => {
+                setCustomerError("");
+                setCustomerRevision((value) => value + 1);
+              }}
+            >
+              Retry
+            </button>
+          </div>
+        )}
+        {customers?.length === 0 && (
+          <p role="status">
+            No customers available. Add a customer to the database before
+            creating a dispute.
+          </p>
+        )}
         <fieldset className="create-fields" disabled={busy}>
-          {(
-            [
-              ["customer_name", "Customer name", "Taylor Example"],
-              ["customer_id", "Customer ID", "cus_example"],
-              ["transaction_id", "Transaction ID", "txn_example"],
-            ] as const
-          ).map(([field, label, placeholder]) => (
-            <div key={field}>
-              <label className="field-label" htmlFor={`create-${field}`}>
-                {label}
-              </label>
-              <input
-                className="text-input"
-                id={`create-${field}`}
-                value={form[field]}
-                onChange={(event) => setField(field, event.target.value)}
-                placeholder={placeholder}
-                maxLength={120}
-                pattern={
-                  field === "customer_name" ? undefined : "[A-Za-z0-9_\\-]+"
-                }
-                title={
-                  field === "customer_name"
-                    ? undefined
-                    : "Use letters, numbers, underscores or hyphens."
-                }
-                required
-              />
-            </div>
-          ))}
+          <div className="create-wide">
+            <label className="field-label" htmlFor="create-customer">
+              Customer
+            </label>
+            <Select
+              className="full-select"
+              id="create-customer"
+              value={form.customer_id}
+              onChange={(event) => setField("customer_id", event.target.value)}
+              disabled={!customers?.length}
+              aria-busy={customers === null && !customerError}
+              required
+            >
+              <option value="" disabled>
+                {customerError
+                  ? "Customers unavailable"
+                  : customers === null
+                    ? "Loading customers…"
+                    : "Choose a customer"}
+              </option>
+              {customers?.map((customer) => (
+                <option key={customer.customer_id} value={customer.customer_id}>
+                  {customer.customer_name} · #{customer.customer_id}
+                </option>
+              ))}
+            </Select>
+          </div>
           <div>
             <label className="field-label" htmlFor="create-reason">
               Reason
@@ -185,41 +211,6 @@ export default function CreateDispute({
             </Select>
           </div>
           <div>
-            <label className="field-label" htmlFor="create-received">
-              Date received
-            </label>
-            <input
-              className="text-input"
-              id="create-received"
-              type="datetime-local"
-              value={form.date_received}
-              onChange={(event) =>
-                setField("date_received", event.target.value)
-              }
-              required
-            />
-          </div>
-          <div>
-            <label className="field-label" htmlFor="create-deadline">
-              Network deadline
-            </label>
-            <input
-              className="text-input"
-              id="create-deadline"
-              type="datetime-local"
-              min={form.date_received}
-              value={form.network_deadline}
-              onChange={(event) =>
-                setField("network_deadline", event.target.value)
-              }
-              required
-            />
-          </div>
-          <p className="create-wide field-hint">
-            Dates use your local timezone and are stored in UTC. The deadline
-            must be on or after the received date; overdue cases are allowed.
-          </p>
-          <div className="create-wide">
             <label className="field-label" htmlFor="create-agent">
               Assigned agent (optional)
             </label>
@@ -271,7 +262,11 @@ export default function CreateDispute({
           >
             Cancel
           </button>
-          <button className="button primary" type="submit" disabled={busy}>
+          <button
+            className="button primary"
+            type="submit"
+            disabled={busy || !customers?.length}
+          >
             <Plus size={14} />
             {busy ? "Adding…" : "Add dispute"}
           </button>

@@ -7,6 +7,7 @@ import {
   statusLabels,
   statuses,
   type CreateDisputeInput,
+  type Customer,
   type Dispute,
   type DisputeDetail,
   type DisputeEvent,
@@ -39,7 +40,7 @@ export function getDetail(db: DB, id: string): DisputeDetail {
       "SELECT * FROM dispute_events WHERE dispute_id = ? ORDER BY created_at DESC, id DESC",
     )
     .all(id) as DisputeEvent[];
-  const seed = [...dispute.customer_id].reduce(
+  const seed = [...String(dispute.customer_id)].reduce(
     (sum, char) => sum + char.charCodeAt(0),
     0,
   );
@@ -111,15 +112,12 @@ export function createDispute(
 ) {
   return db
     .transaction(() => {
-      if (
-        db
-          .prepare("SELECT 1 FROM disputes WHERE transaction_id = ?")
-          .get(input.transaction_id)
-      )
-        throw new RequestError(
-          409,
-          "A dispute already exists for this transaction.",
-        );
+      const customer = db
+        .prepare(
+          "SELECT customer_id, customer_name FROM customers WHERE customer_id = ?",
+        )
+        .get(input.customer_id) as Customer | undefined;
+      if (!customer) throw new RequestError(400, "Choose an existing customer.");
       if (
         input.assigned_agent &&
         !agents.includes(input.assigned_agent) &&
@@ -138,12 +136,16 @@ export function createDispute(
         .get() as { next_id: number };
       if (next_id > 999999999999)
         throw new RequestError(409, "Dispute ID limit reached.");
-      const now = new Date().toISOString();
-      const dispute: Dispute = {
+      const received = Date.now();
+      const now = new Date(received).toISOString();
+      const dispute: Omit<Dispute, "transaction_id"> = {
         ...input,
+        customer_name: customer.customer_name,
         id: `DSP-${next_id}`,
         status: "new",
-        risk_score: [...input.customer_id].reduce(
+        date_received: now,
+        network_deadline: new Date(received + 7 * 24 * HOUR).toISOString(),
+        risk_score: [...String(input.customer_id)].reduce(
           (score, char) => (score * 31 + char.charCodeAt(0)) % 101,
           0,
         ),
@@ -152,11 +154,11 @@ export function createDispute(
       };
       db.prepare(
         `INSERT INTO disputes (
-        id, transaction_id, customer_id, customer_name, amount, currency,
+        id, customer_id, customer_name, amount, currency,
         reason_code, status, date_received, network_deadline, assigned_agent,
         risk_score, notes, created_at, updated_at
       ) VALUES (
-        @id, @transaction_id, @customer_id, @customer_name, @amount, @currency,
+        @id, @customer_id, @customer_name, @amount, @currency,
         @reason_code, @status, @date_received, @network_deadline, @assigned_agent,
         @risk_score, @notes, @created_at, @updated_at
       )`,
