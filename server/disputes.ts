@@ -1,0 +1,250 @@
+import { randomUUID } from "node:crypto";
+import type { DB } from "./database";
+import {
+  HOUR,
+  isActive,
+  statusLabels,
+  statuses,
+  type Dispute,
+  type DisputeDetail,
+  type DisputeEvent,
+  type EventType,
+  type Status,
+  type Summary,
+} from "../shared/domain";
+
+export class RequestError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+export function getDispute(db: DB, id: string): Dispute {
+  const dispute = db.prepare("SELECT * FROM disputes WHERE id = ?").get(id) as
+    | Dispute
+    | undefined;
+  if (!dispute) throw new RequestError(404, "Dispute not found.");
+  return dispute;
+}
+
+export function getDetail(db: DB, id: string): DisputeDetail {
+  const dispute = getDispute(db, id);
+  const events = db
+    .prepare(
+      "SELECT * FROM dispute_events WHERE dispute_id = ? ORDER BY created_at DESC, id DESC",
+    )
+    .all(id) as DisputeEvent[];
+  const seed = [...dispute.customer_id].reduce(
+    (sum, char) => sum + char.charCodeAt(0),
+    0,
+  );
+  const merchants = [
+    "Atlas Supply Co.",
+    "Northstar Market",
+    "Juniper Coffee",
+    "Cloudline Software",
+  ];
+  const transactions = Array.from({ length: 2 + (seed % 3) }, (_, i) => ({
+    id: `txn_prior_${seed}_${i}`,
+    merchant: merchants[(seed + i) % merchants.length],
+    amount: 1599 + ((seed * (i + 3) * 71) % 25000),
+    currency: dispute.currency,
+    date: new Date(
+      new Date(dispute.date_received).getTime() - (i + 1) * 8 * 24 * HOUR,
+    ).toISOString(),
+  }));
+  return {
+    dispute,
+    events,
+    transactions,
+    risk: [
+      {
+        label: "Device fingerprint",
+        value:
+          dispute.risk_score >= 65
+            ? "Previously unseen device"
+            : "Recognized device",
+      },
+      {
+        label: "Address verification",
+        value: dispute.risk_score >= 80 ? "Partial match" : "Match",
+      },
+      {
+        label: "Purchase pattern",
+        value:
+          dispute.risk_score >= 50
+            ? "Above typical spend"
+            : "Consistent with history",
+      },
+      { label: "Account age", value: `${6 + (seed % 36)} months` },
+    ],
+  };
+}
+
+function addEvent(
+  db: DB,
+  disputeId: string,
+  type: EventType,
+  actor: string,
+  detail: string,
+  now: string,
+) {
+  db.prepare("INSERT INTO dispute_events VALUES (?, ?, ?, ?, ?, ?)").run(
+    randomUUID(),
+    disputeId,
+    type,
+    actor,
+    detail,
+    now,
+  );
+}
+
+export function changeDispute(
+  db: DB,
+  id: string,
+  actor: string,
+  input: {
+    expected_updated_at: string;
+    status?: Status;
+    assigned_agent?: string | null;
+  },
+) {
+  return db.transaction(() => {
+    const dispute = getDispute(db, id);
+    if (input.expected_updated_at !== dispute.updated_at)
+      throw new RequestError(
+        409,
+        "This dispute changed. Refresh the details and try again.",
+      );
+    const now = new Date(
+      Math.max(Date.now(), Date.parse(dispute.updated_at) + 1),
+    ).toISOString();
+    let changed = false;
+    if (input.status !== undefined && input.status !== dispute.status) {
+      db.prepare("UPDATE disputes SET status = ? WHERE id = ?").run(
+        input.status,
+        id,
+      );
+      addEvent(
+        db,
+        id,
+        input.status === "evidence_submitted"
+          ? "evidence_submitted"
+          : "status_change",
+        actor,
+        `Status changed from ${statusLabels[dispute.status]} to ${statusLabels[input.status]}`,
+        now,
+      );
+      changed = true;
+    }
+    if (
+      input.assigned_agent !== undefined &&
+      input.assigned_agent !== dispute.assigned_agent
+    ) {
+      db.prepare("UPDATE disputes SET assigned_agent = ? WHERE id = ?").run(
+        input.assigned_agent,
+        id,
+      );
+      addEvent(
+        db,
+        id,
+        "assigned",
+        actor,
+        input.assigned_agent
+          ? `Assigned to ${input.assigned_agent}`
+          : "Removed agent assignment",
+        now,
+      );
+      changed = true;
+    }
+    if (changed)
+      db.prepare("UPDATE disputes SET updated_at = ? WHERE id = ?").run(
+        now,
+        id,
+      );
+    return getDetail(db, id);
+  })();
+}
+
+export function appendNote(db: DB, id: string, actor: string, note: string) {
+  return db.transaction(() => {
+    const dispute = getDispute(db, id);
+    const notes = dispute.notes ? `${dispute.notes}\n\n${note}` : note;
+    if (notes.length > 64000)
+      throw new RequestError(
+        400,
+        "This dispute has reached its note storage limit.",
+      );
+    const now = new Date(
+      Math.max(Date.now(), Date.parse(dispute.updated_at) + 1),
+    ).toISOString();
+    db.prepare(
+      "UPDATE disputes SET notes = ?, updated_at = ? WHERE id = ?",
+    ).run(notes, now, id);
+    addEvent(db, id, "note_added", actor, note, now);
+    return getDetail(db, id);
+  })();
+}
+
+export function bulkStatus(
+  db: DB,
+  actor: string,
+  items: { id: string; expected_updated_at: string }[],
+  status: Status,
+) {
+  return db.transaction(() => {
+    let updated = 0;
+    for (const item of items) {
+      const before = getDispute(db, item.id);
+      changeDispute(db, item.id, actor, {
+        expected_updated_at: item.expected_updated_at,
+        status,
+      });
+      if (before.status !== status) updated += 1;
+    }
+    return { updated, unchanged: items.length - updated };
+  })();
+}
+
+export function getSummary(db: DB, now = Date.now()): Summary {
+  const rows = db
+    .prepare("SELECT status, network_deadline, amount, currency FROM disputes")
+    .all() as Pick<
+    Dispute,
+    "status" | "network_deadline" | "amount" | "currency"
+  >[];
+  const summary: Summary = {
+    total: rows.length,
+    by_status: {
+      new: 0,
+      investigating: 0,
+      evidence_submitted: 0,
+      won: 0,
+      lost: 0,
+      auto_resolved: 0,
+      closed: 0,
+    },
+    due_48h: 0,
+    overdue: 0,
+    amount_at_risk: {},
+    generated_at: new Date(now).toISOString(),
+  };
+  for (const status of statuses)
+    summary.by_status[status] = rows.filter(
+      (row) => row.status === status,
+    ).length;
+  for (const row of rows) {
+    const remaining = Date.parse(row.network_deadline) - now;
+    if (isActive(row.status)) {
+      if (remaining < 0) summary.overdue++;
+      else if (remaining < 48 * HOUR) summary.due_48h++;
+    }
+    if (row.status !== "closed")
+      summary.amount_at_risk[row.currency] =
+        (summary.amount_at_risk[row.currency] || 0) + row.amount;
+  }
+  return summary;
+}
