@@ -36,6 +36,7 @@ Shell environment variables are used directly; the server does not automatically
 ## Workflow and SLA definitions
 
 - Search by customer name or transaction ID; combine status, reason, agent, and urgency filters. Click deadline, amount, or status headings to toggle sorting. Clear filters to return to all disputes.
+- Agent options include every current custom assignment plus the four predefined agents, independently of other filters. “Unassigned (no agent)” is distinct from an agent named `unassigned`. Failed queue requests hide rows/counts until a successful retry.
 - Click a dispute to open its details. Change status, assign a listed/custom agent, or add a plain-text note; each actual change creates an audit event. The linked transactions and risk signals are explicitly mock data.
 - Select rows across pages, choose **Change status**, and confirm. The entire batch fails if any selected record has changed, so refresh and reselect after a conflict. Already-matching statuses are reported as unchanged.
 - Red = overdue or under 48 hours; yellow = 48 hours through 5 days inclusive; green = over 5 days. All deadlines are UTC timestamps, displayed in the browser's local timezone. SLA indicators remain visible on resolved disputes for historical context.
@@ -62,6 +63,8 @@ Amounts are **integer minor units** (USD cents in the seed). Statuses: `new`, `i
 - `src/SummaryCards.tsx`, `src/api.ts`: global metrics and central API client.
 
 API: `GET /api/disputes`, `GET /api/disputes/:id`, `GET /api/summary`, `PATCH /api/disputes/:id`, `POST /api/disputes/:id/notes`, `POST /api/disputes/bulk-status`. Writes require JSON and `X-Dispute-Client: internal-web`; patches and each bulk item require `expected_updated_at`. These request guards **are not authentication**. A note append is transactional and does not overwrite existing notes.
+
+Queue responses include global `agents` filter options alongside the matching `disputes` and `total`. Use `assignment=assigned&agent=<name>` for a literal agent name or `assignment=unassigned` for null assignments; the original `agent=unassigned` shorthand is also accepted.
 
 For Postgres, retain the logical tables and constraints, use `timestamptz`/UUID types as appropriate, replace `better-sqlite3` and `?` placeholders, add versioned migrations, and preserve event immutability. Use row locking or conditional `UPDATE ... WHERE updated_at = ...` with affected-row checks for concurrency; SQLite's serialized writes must not be assumed in Postgres. Move queue pagination/filtering and aggregation fully into SQL as volume grows.
 

@@ -22,7 +22,13 @@ import {
   getSummary,
   RequestError,
 } from "./disputes";
-import { reasons, statuses, urgency, type Dispute } from "../shared/domain";
+import {
+  agents,
+  reasons,
+  statuses,
+  urgency,
+  type Dispute,
+} from "../shared/domain";
 
 const queueQuery = z
   .object({
@@ -30,6 +36,7 @@ const queueQuery = z
     status: z.enum(statuses).optional(),
     reason: z.enum(reasons).optional(),
     agent: z.string().max(100).optional(),
+    assignment: z.enum(["assigned", "unassigned"]).optional(),
     scope: z.enum(["active", "non_closed"]).optional(),
     urgency: z.enum(["overdue", "urgent", "upcoming", "on_track"]).optional(),
     sort: z
@@ -145,11 +152,16 @@ export function createApp(db: DB, identity: RequestHandler = resolveActor) {
       clauses.push("reason_code = ?");
       values.push(query.reason);
     }
-    if (query.agent === "unassigned") clauses.push("assigned_agent IS NULL");
+    if (
+      query.assignment === "unassigned" ||
+      (!query.assignment && query.agent === "unassigned")
+    )
+      clauses.push("assigned_agent IS NULL");
     else if (query.agent) {
       clauses.push("assigned_agent = ?");
       values.push(query.agent);
-    }
+    } else if (query.assignment === "assigned")
+      clauses.push("assigned_agent IS NOT NULL");
     const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
     const rows = db
       .prepare(
@@ -162,7 +174,21 @@ export function createApp(db: DB, identity: RequestHandler = resolveActor) {
           (row) => urgency(row.network_deadline, now) === query.urgency,
         )
       : rows;
-    res.json({ disputes, total: disputes.length });
+    const assignedAgents = db
+      .prepare(
+        "SELECT DISTINCT assigned_agent FROM disputes WHERE assigned_agent IS NOT NULL ORDER BY assigned_agent",
+      )
+      .all() as { assigned_agent: string }[];
+    res.json({
+      disputes,
+      total: disputes.length,
+      agents: [
+        ...new Set([
+          ...agents,
+          ...assignedAgents.map((row) => row.assigned_agent),
+        ]),
+      ],
+    });
   });
   app.get("/api/summary", authorize("disputes:read"), (_req, res) => {
     res.json(getSummary(db));

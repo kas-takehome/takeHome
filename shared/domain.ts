@@ -89,6 +89,7 @@ export function isActive(status: Status) {
 export interface QueueResponse {
   disputes: Dispute[];
   total: number;
+  agents: string[];
 }
 export interface MockTransaction {
   id: string;

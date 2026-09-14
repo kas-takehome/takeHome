@@ -43,6 +43,7 @@ export default function App() {
   const [status, setStatus] = useState("");
   const [reason, setReason] = useState("");
   const [agent, setAgent] = useState("");
+  const [agentOptions, setAgentOptions] = useState(agents);
   const [urgency, setUrgency] = useState("");
   const [scope, setScope] = useState("");
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -93,6 +94,7 @@ export default function App() {
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
+    setError("");
     setSelected(new Set());
     const timer = window.setTimeout(() => {
       const params = new URLSearchParams({ sort, order });
@@ -100,14 +102,20 @@ export default function App() {
         search,
         status,
         reason,
-        agent,
         urgency,
         scope,
       }))
         if (value) params.set(key, value);
+      if (agent === "unassigned") params.set("assignment", "unassigned");
+      else if (agent.startsWith("name:")) {
+        params.set("agent", agent.slice(5));
+        params.set("assignment", "assigned");
+      }
       api<QueueResponse>(`/disputes?${params}`, { signal: controller.signal })
         .then((data) => {
+          if (controller.signal.aborted) return;
           setDisputes(data.disputes);
+          setAgentOptions(data.agents);
           setError("");
           setPage((previous) =>
             Math.min(
@@ -117,7 +125,10 @@ export default function App() {
           );
         })
         .catch((err: Error) => {
-          if (err.name !== "AbortError") setError(err.message);
+          if (!controller.signal.aborted) {
+            setDisputes([]);
+            setError(err.message);
+          }
         })
         .finally(() => {
           if (!controller.signal.aborted) setLoading(false);
@@ -157,7 +168,13 @@ export default function App() {
     ) : (
       <ArrowUpDown size={12} />
     );
-  const visible = disputes.slice((page - 1) * pageSize, page * pageSize);
+  const visible =
+    loading || error
+      ? []
+      : disputes.slice((page - 1) * pageSize, page * pageSize);
+  const filterAgents = agent.startsWith("name:")
+    ? [...new Set([...agentOptions, agent.slice(5)])]
+    : agentOptions;
   const allPageSelected =
     visible.length > 0 && visible.every((dispute) => selected.has(dispute.id));
   function toggleSelection(id: string) {
@@ -287,11 +304,15 @@ export default function App() {
             <div className="queue-tabs">
               <div className="tab active">
                 {filtersActive ? "Filtered disputes" : "All disputes"}{" "}
-                <span>{disputes.length}</span>
+                <span>{loading || error ? "—" : disputes.length}</span>
               </div>
               <div className="queue-meta">
                 <span className="live-dot" />
-                SQLite · live data
+                {loading
+                  ? "Updating queue…"
+                  : error
+                    ? "Queue unavailable"
+                    : "SQLite · live data"}
               </div>
             </div>
             <div className="filter-toolbar">
@@ -344,9 +365,11 @@ export default function App() {
                   onChange={(e) => setAgent(e.target.value)}
                 >
                   <option value="">All agents</option>
-                  <option value="unassigned">Unassigned</option>
-                  {agents.map((value) => (
-                    <option key={value}>{value}</option>
+                  <option value="unassigned">Unassigned (no agent)</option>
+                  {filterAgents.map((value) => (
+                    <option key={value} value={`name:${value}`}>
+                      {value}
+                    </option>
                   ))}
                 </Select>
                 <Select
@@ -364,7 +387,11 @@ export default function App() {
             </div>
             {filtersActive && (
               <div className="filter-summary">
-                {disputes.length} matching disputes
+                {loading
+                  ? "Updating queue…"
+                  : error
+                    ? "Results unavailable"
+                    : `${disputes.length} matching disputes`}
                 {scope &&
                   ` · ${scope === "active" ? "Active cases only" : "Excluding closed"}`}
                 <button onClick={clearFilters}>
@@ -543,7 +570,7 @@ export default function App() {
                   ))}
                 </tbody>
               </table>
-              {!loading && !visible.length && (
+              {!loading && !error && !visible.length && (
                 <div className="empty-state">
                   <Search size={26} />
                   <h3>No disputes found</h3>
@@ -553,7 +580,7 @@ export default function App() {
                   </button>
                 </div>
               )}
-              {loading && !disputes.length && (
+              {loading && (
                 <div className="empty-state">
                   <RefreshCw className="spin" size={24} />
                   <p>Loading your queue…</p>
@@ -562,19 +589,25 @@ export default function App() {
             </div>
             <div className="table-footer">
               <span>
-                {disputes.length
-                  ? `Showing ${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, disputes.length)} of ${disputes.length} disputes`
-                  : "0 disputes"}
+                {loading
+                  ? "Updating queue…"
+                  : error
+                    ? "Results unavailable"
+                    : disputes.length
+                      ? `Showing ${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, disputes.length)} of ${disputes.length} disputes`
+                      : "0 disputes"}
               </span>
               <div className="pagination">
-                <span>
-                  Page {page} of{" "}
-                  {Math.max(1, Math.ceil(disputes.length / pageSize))}
-                </span>
+                {!loading && !error && (
+                  <span>
+                    Page {page} of{" "}
+                    {Math.max(1, Math.ceil(disputes.length / pageSize))}
+                  </span>
+                )}
                 <button
                   className="icon-button"
                   aria-label="Previous page"
-                  disabled={page === 1}
+                  disabled={loading || !!error || page === 1}
                   onClick={() => setPage((p) => p - 1)}
                 >
                   <ChevronLeft size={15} />
@@ -582,7 +615,9 @@ export default function App() {
                 <button
                   className="icon-button"
                   aria-label="Next page"
-                  disabled={page * pageSize >= disputes.length}
+                  disabled={
+                    loading || !!error || page * pageSize >= disputes.length
+                  }
                   onClick={() => setPage((p) => p + 1)}
                 >
                   <ChevronRight size={15} />
