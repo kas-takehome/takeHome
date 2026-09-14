@@ -646,6 +646,7 @@ export default function App() {
         <Detail
           key={detailId}
           id={detailId}
+          agentOptions={agentOptions}
           onClose={() => {
             window.location.hash = "";
           }}

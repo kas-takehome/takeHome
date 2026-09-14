@@ -12,7 +12,6 @@ import {
   X,
 } from "lucide-react";
 import {
-  agents,
   reasonLabels,
   statusLabels,
   statuses,
@@ -26,10 +25,12 @@ import Modal from "./Modal";
 
 export default function Detail({
   id,
+  agentOptions,
   onClose,
   onChange,
 }: {
   id: string;
+  agentOptions: string[];
   onClose: () => void;
   onChange: () => void;
 }) {
@@ -104,6 +105,12 @@ export default function Detail({
     }
   }
   const dispute = data?.dispute;
+  const assignmentAgents = [
+    ...new Set([
+      ...agentOptions,
+      ...(dispute?.assigned_agent ? [dispute.assigned_agent] : []),
+    ]),
+  ];
   return (
     <Modal
       className="detail-drawer"
@@ -321,31 +328,30 @@ export default function Detail({
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
-                  void update({ assigned_agent: agent.trim() || null });
+                  void update({ assigned_agent: agent || null });
                 }}
               >
                 <label className="field-label" htmlFor="agent">
                   Assigned agent
                 </label>
-                <input
+                <Select
                   id="agent"
-                  className="text-input"
-                  list="agents"
+                  className="full-select"
                   value={agent}
-                  maxLength={80}
-                  placeholder="Unassigned"
                   disabled={busy}
                   onChange={(e) => setAgent(e.target.value)}
-                />
-                <datalist id="agents">
-                  {agents.map((name) => (
-                    <option key={name} value={name} />
+                >
+                  <option value="">Unassigned (no agent)</option>
+                  {assignmentAgents.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
                   ))}
-                </datalist>
+                </Select>
                 <button
                   className="button secondary full-width"
                   disabled={
-                    busy || agent.trim() === (dispute.assigned_agent || "")
+                    busy || agent === (dispute.assigned_agent || "")
                   }
                   type="submit"
                 >
