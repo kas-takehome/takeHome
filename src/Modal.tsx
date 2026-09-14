@@ -14,12 +14,15 @@ export default function Modal({
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const dialog = ref.current;
+    const previousFocus = document.activeElement;
     const previousOverflow = document.body.style.overflow;
     dialog?.showModal();
     document.body.style.overflow = "hidden";
     return () => {
       dialog?.close();
       document.body.style.overflow = previousOverflow;
+      if (previousFocus instanceof HTMLElement && previousFocus.isConnected)
+        previousFocus.focus({ preventScroll: true });
     };
   }, []);
   return (
