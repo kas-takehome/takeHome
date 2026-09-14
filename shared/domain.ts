@@ -23,6 +23,7 @@ export const agents = [
   "Priya Patel",
   "James Okafor",
 ];
+export const currencies = ["USD", "EUR", "GBP", "CAD", "AUD"] as const;
 export const statusLabels: Record<Status, string> = {
   new: "New",
   investigating: "Investigating",
@@ -40,11 +41,13 @@ export const reasonLabels: Record<Reason, string> = {
   subscription_cancelled: "Subscription cancelled",
   other: "Other",
 };
-export interface Dispute {
-  id: string;
-  transaction_id: string;
-  customer_id: string;
+export interface Customer {
+  customer_id: number;
   customer_name: string;
+}
+export interface Dispute extends Customer {
+  id: string;
+  transaction_id: number;
   amount: number;
   currency: string;
   reason_code: Reason;
@@ -57,6 +60,15 @@ export interface Dispute {
   created_at: string;
   updated_at: string;
 }
+export type CreateDisputeInput = Pick<
+  Dispute,
+  | "customer_id"
+  | "amount"
+  | "currency"
+  | "reason_code"
+  | "assigned_agent"
+  | "notes"
+>;
 export type EventType =
   | "status_change"
   | "note_added"

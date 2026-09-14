@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import { chmodSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { migrateDatabase } from "./migrations";
 import {
   agents,
   HOUR,
@@ -23,35 +24,19 @@ export function openDatabase(
   if (filename !== ":memory:") chmodSync(filename, 0o600);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS disputes (
-      id TEXT PRIMARY KEY, transaction_id TEXT NOT NULL UNIQUE,
-      customer_id TEXT NOT NULL, customer_name TEXT NOT NULL,
-      amount INTEGER NOT NULL CHECK (amount >= 0), currency TEXT NOT NULL,
-      reason_code TEXT NOT NULL CHECK (reason_code IN ('fraud','duplicate','product_not_received','product_not_as_described','subscription_cancelled','other')),
-      status TEXT NOT NULL CHECK (status IN ('new','investigating','evidence_submitted','won','lost','auto_resolved','closed')),
-      date_received TEXT NOT NULL, network_deadline TEXT NOT NULL,
-      assigned_agent TEXT, risk_score INTEGER NOT NULL CHECK (risk_score BETWEEN 0 AND 100),
-      notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS dispute_events (
-      id TEXT PRIMARY KEY, dispute_id TEXT NOT NULL REFERENCES disputes(id),
-      event_type TEXT NOT NULL CHECK (event_type IN ('status_change','note_added','assigned','evidence_submitted')),
-      actor TEXT NOT NULL, detail TEXT NOT NULL, created_at TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS disputes_deadline_idx ON disputes(network_deadline);
-    CREATE INDEX IF NOT EXISTS disputes_status_idx ON disputes(status);
-    CREATE INDEX IF NOT EXISTS dispute_events_dispute_idx ON dispute_events(dispute_id, created_at DESC);
-    CREATE TRIGGER IF NOT EXISTS events_no_update BEFORE UPDATE ON dispute_events
-      BEGIN SELECT RAISE(ABORT, 'Audit events cannot be changed'); END;
-    CREATE TRIGGER IF NOT EXISTS events_no_delete BEFORE DELETE ON dispute_events
-      BEGIN SELECT RAISE(ABORT, 'Audit events cannot be deleted'); END;
-  `);
-  const count = db.prepare("SELECT COUNT(*) AS count FROM disputes").get() as {
-    count: number;
-  };
-  if (!count.count) seed(db, now);
-  return db;
+  try {
+    migrateDatabase(db);
+    const { count } = db
+      .prepare(
+        "SELECT (SELECT COUNT(*) FROM disputes) + (SELECT COUNT(*) FROM customers) AS count",
+      )
+      .get() as { count: number };
+    if (!count) seed(db, now);
+    return db;
+  } catch (error) {
+    db.close();
+    throw error;
+  }
 }
 
 function seed(db: DB, now: number) {
@@ -126,11 +111,15 @@ function seed(db: DB, now: number) {
     @reason_code, @status, @date_received, @network_deadline, @assigned_agent,
     @risk_score, @notes, @created_at, @updated_at
   )`);
+  const customer = db.prepare(
+    "INSERT INTO customers (customer_id, customer_name) VALUES (?, ?)",
+  );
   const event = db.prepare(
     "INSERT INTO dispute_events VALUES (?, ?, ?, ?, ?, ?)",
   );
   db.transaction(() =>
     names.forEach((name, i) => {
+      customer.run(i + 1, name);
       const status: Status =
         i < 12
           ? "new"
@@ -149,8 +138,8 @@ function seed(db: DB, now: number) {
       const updated = new Date(now - (i + 1) * HOUR).toISOString();
       const record: Dispute = {
         id: `DSP-${1048 - i}`,
-        transaction_id: `txn_${(948210 + i * 731).toString(16)}${(i * 17 + 83).toString(16)}`,
-        customer_id: `cus_${70100 + i}`,
+        transaction_id: i + 1,
+        customer_id: i + 1,
         customer_name: name,
         amount: amounts[i % amounts.length] + Math.floor(i / 12) * 100,
         currency: "USD",

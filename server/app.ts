@@ -18,15 +18,18 @@ import {
   appendNote,
   bulkStatus,
   changeDispute,
+  createDispute,
   getDetail,
   getSummary,
   RequestError,
 } from "./disputes";
 import {
   agents,
+  currencies,
   reasons,
   statuses,
   urgency,
+  type Customer,
   type Dispute,
 } from "../shared/domain";
 
@@ -65,6 +68,23 @@ const updateInput = z
   );
 const noteInput = z
   .object({ note: z.string().trim().min(1).max(4000).pipe(safeText) })
+  .strict();
+const createInput = z
+  .object({
+    customer_id: z.number().int().positive().safe(),
+    amount: z.number().int().min(1).max(999999999),
+    currency: z.enum(currencies),
+    reason_code: z.enum(reasons),
+    assigned_agent: z
+      .string()
+      .trim()
+      .min(1)
+      .max(80)
+      .pipe(safeText)
+      .nullable()
+      .default(null),
+    notes: z.string().trim().max(4000).pipe(safeText).default(""),
+  })
   .strict();
 const bulkInput = z
   .object({
@@ -130,6 +150,14 @@ export function createApp(db: DB, identity: RequestHandler = resolveActor) {
   app.get("/api/health", (_req, res) => {
     res.json({ status: "ok" });
   });
+  app.get("/api/customers", authorize("disputes:read"), (_req, res) => {
+    const customers = db
+      .prepare(
+        "SELECT customer_id, customer_name FROM customers ORDER BY customer_name COLLATE NOCASE, customer_id",
+      )
+      .all() as Customer[];
+    res.json({ customers });
+  });
   app.get("/api/disputes", authorize("disputes:read"), (req, res) => {
     const query = queueQuery.parse(req.query);
     const clauses: string[] = [];
@@ -192,6 +220,11 @@ export function createApp(db: DB, identity: RequestHandler = resolveActor) {
   });
   app.get("/api/summary", authorize("disputes:read"), (_req, res) => {
     res.json(getSummary(db));
+  });
+  app.post("/api/disputes", (req, res) => {
+    const actor = res.locals.actor as Actor;
+    const result = createDispute(db, actor.name, createInput.parse(req.body));
+    res.status(201).location(`/api/disputes/${result.dispute.id}`).json(result);
   });
   app.post("/api/disputes/bulk-status", (req, res) => {
     const actor = res.locals.actor as Actor;
