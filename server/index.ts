@@ -1,12 +1,17 @@
 import express from "express";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { existsSync } from "node:fs";
+import { loadEnvFile } from "node:process";
 import { openDatabase } from "./database";
 import { createApp } from "./app";
+import { createAuthentication, readAuthConfig } from "./auth";
 
 process.umask(0o077);
+if (existsSync(".env.local")) loadEnvFile(".env.local");
+const authConfig = readAuthConfig();
 const db = openDatabase(process.env.DATABASE_PATH);
-const app = createApp(db);
+const app = createApp(db, createAuthentication(db, authConfig));
 const production = process.argv.includes("--production");
 if (production) {
   const dist = fileURLToPath(new URL("../dist/", import.meta.url));

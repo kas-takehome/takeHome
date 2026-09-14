@@ -11,13 +11,27 @@ import {
   type Status,
 } from "../shared/domain";
 
-export type DB = Database.Database;
+export interface DB {
+  readonly open: boolean;
+  prepare(sql: string): {
+    get(...params: unknown[]): unknown;
+    all(...params: unknown[]): unknown[];
+    run(...params: unknown[]): {
+      changes: number;
+      lastInsertRowid: number | bigint;
+    };
+  };
+  exec(sql: string): unknown;
+  pragma(sql: string, options?: { simple?: boolean }): unknown;
+  transaction<T>(fn: () => T): { (): T; immediate(): T };
+  close(): unknown;
+}
 const root = fileURLToPath(new URL("../", import.meta.url));
 
 export function openDatabase(
   filename = resolve(root, "data/disputes.sqlite"),
   now = Date.now(),
-): DB {
+): Database.Database {
   if (filename !== ":memory:")
     mkdirSync(dirname(filename), { recursive: true, mode: 0o700 });
   const db = new Database(filename);
@@ -25,18 +39,24 @@ export function openDatabase(
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   try {
-    migrateDatabase(db);
+    initializeDatabase(db, now);
+    return db;
+  } catch (error) {
+    db.close();
+    throw error;
+  }
+}
+
+export function initializeDatabase(db: DB, now = Date.now()) {
+  migrateDatabase(db);
+  db.transaction(() => {
     const { count } = db
       .prepare(
         "SELECT (SELECT COUNT(*) FROM disputes) + (SELECT COUNT(*) FROM customers) AS count",
       )
       .get() as { count: number };
     if (!count) seed(db, now);
-    return db;
-  } catch (error) {
-    db.close();
-    throw error;
-  }
+  }).immediate();
 }
 
 function seed(db: DB, now: number) {
@@ -107,9 +127,7 @@ function seed(db: DB, now: number) {
     "Customer requested a review of this transaction. Additional information pending.",
   ];
   const insert = db.prepare(`INSERT INTO disputes VALUES (
-    @id, @transaction_id, @customer_id, @customer_name, @amount, @currency,
-    @reason_code, @status, @date_received, @network_deadline, @assigned_agent,
-    @risk_score, @notes, @created_at, @updated_at
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
   )`);
   const customer = db.prepare(
     "INSERT INTO customers (customer_id, customer_name) VALUES (?, ?)",
@@ -117,73 +135,87 @@ function seed(db: DB, now: number) {
   const event = db.prepare(
     "INSERT INTO dispute_events VALUES (?, ?, ?, ?, ?, ?)",
   );
-  db.transaction(() =>
-    names.forEach((name, i) => {
-      customer.run(i + 1, name);
-      const status: Status =
-        i < 12
-          ? "new"
-          : i < 26
-            ? "investigating"
-            : i < 34
-              ? "evidence_submitted"
-              : i < 39
-                ? "won"
-                : i < 43
-                  ? "lost"
-                  : i < 46
-                    ? "auto_resolved"
-                    : "closed";
-      const created = new Date(now - (7 + (i % 18)) * 24 * HOUR).toISOString();
-      const updated = new Date(now - (i + 1) * HOUR).toISOString();
-      const record: Dispute = {
-        id: `DSP-${1048 - i}`,
-        transaction_id: i + 1,
-        customer_id: i + 1,
-        customer_name: name,
-        amount: amounts[i % amounts.length] + Math.floor(i / 12) * 100,
-        currency: "USD",
-        reason_code: reasons[i % reasons.length],
-        status,
-        date_received: created,
-        network_deadline: new Date(
-          now + offsets[i % offsets.length] * HOUR,
-        ).toISOString(),
-        assigned_agent: i % 5 === 0 ? null : agents[i % 4],
-        risk_score: (i * 19 + 76) % 101,
-        notes: notes[i % notes.length],
-        created_at: created,
-        updated_at: updated,
-      };
-      insert.run(record);
+  names.forEach((name, i) => {
+    customer.run(i + 1, name);
+    const status: Status =
+      i < 12
+        ? "new"
+        : i < 26
+          ? "investigating"
+          : i < 34
+            ? "evidence_submitted"
+            : i < 39
+              ? "won"
+              : i < 43
+                ? "lost"
+                : i < 46
+                  ? "auto_resolved"
+                  : "closed";
+    const created = new Date(now - (7 + (i % 18)) * 24 * HOUR).toISOString();
+    const updated = new Date(now - (i + 1) * HOUR).toISOString();
+    const record: Dispute = {
+      id: `DSP-${1048 - i}`,
+      transaction_id: i + 1,
+      customer_id: i + 1,
+      customer_name: name,
+      amount: amounts[i % amounts.length] + Math.floor(i / 12) * 100,
+      currency: "USD",
+      reason_code: reasons[i % reasons.length],
+      status,
+      date_received: created,
+      network_deadline: new Date(
+        now + offsets[i % offsets.length] * HOUR,
+      ).toISOString(),
+      assigned_agent: i % 5 === 0 ? null : agents[i % 4],
+      risk_score: (i * 19 + 76) % 101,
+      notes: notes[i % notes.length],
+      created_at: created,
+      updated_at: updated,
+    };
+    insert.run(
+      record.id,
+      record.transaction_id,
+      record.customer_id,
+      record.customer_name,
+      record.amount,
+      record.currency,
+      record.reason_code,
+      record.status,
+      record.date_received,
+      record.network_deadline,
+      record.assigned_agent,
+      record.risk_score,
+      record.notes,
+      record.created_at,
+      record.updated_at,
+    );
+    event.run(
+      `seed-${i}-note`,
+      record.id,
+      "note_added",
+      "System · demo seed",
+      record.notes,
+      created,
+    );
+    if (record.assigned_agent)
       event.run(
-        `seed-${i}-note`,
+        `seed-${i}-assigned`,
         record.id,
-        "note_added",
+        "assigned",
         "System · demo seed",
-        record.notes,
+        `Assigned to ${record.assigned_agent}`,
         created,
       );
-      if (record.assigned_agent)
-        event.run(
-          `seed-${i}-assigned`,
-          record.id,
-          "assigned",
-          "System · demo seed",
-          `Assigned to ${record.assigned_agent}`,
-          created,
-        );
-      if (status !== "new")
-        event.run(
-          `seed-${i}-status`,
-          record.id,
-          status === "evidence_submitted"
-            ? "evidence_submitted"
-            : "status_change",
-          "System · demo seed",
-          `Status changed from new to ${status}`,
-          updated,
-        );
-    }),
-  )();
+    if (status !== "new")
+      event.run(
+        `seed-${i}-status`,
+        record.id,
+        status === "evidence_submitted"
+          ? "evidence_submitted"
+          : "status_change",
+        "System · demo seed",
+        `Status changed from new to ${status}`,
+        updated,
+      );
+  });
 }

@@ -39,7 +39,17 @@ import Modal from "./Modal";
 import BulkAction from "./BulkAction";
 import SummaryCards, { type SummaryFilter } from "./SummaryCards";
 
-export default function App() {
+export default function App({
+  username,
+  onSignOut,
+  signingOut,
+  authError,
+}: {
+  username: string;
+  onSignOut: () => void;
+  signingOut: boolean;
+  authError: string;
+}) {
   const [disputes, setDisputes] = useState<Dispute[]>([]);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
@@ -241,9 +251,9 @@ export default function App() {
             </div>
           </div>
           <div className="operator">
-            <span className="operator-avatar">LO</span>
+            <span className="operator-avatar">{initials(username)}</span>
             <div>
-              <strong>Local operator</strong>
+              <strong>{username}</strong>
               <span>Support & operations</span>
             </div>
             <span className="online-dot" />
@@ -271,10 +281,21 @@ export default function App() {
             >
               <CircleHelp size={18} />
             </button>
-            <span className="small-avatar">LO</span>
+            <button
+              className="button secondary"
+              onClick={onSignOut}
+              disabled={signingOut}
+            >
+              {signingOut ? "Signing out…" : "Sign out"}
+            </button>
           </div>
         </header>
         <main>
+          {authError && (
+            <div className="error-banner" role="alert">
+              {authError}
+            </div>
+          )}
           <div className="page-heading">
             <div>
               <div className="eyebrow">DISPUTE OPERATIONS</div>

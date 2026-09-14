@@ -1,0 +1,8 @@
+.git
+.env*
+data
+*.sqlite*
+*.db*
+coverage
+**/*.test.ts
+**/*.test.tsx
