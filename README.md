@@ -35,6 +35,8 @@ Shell environment variables are used directly; the server does not automatically
 
 ## Workflow and SLA definitions
 
+- Click **Add dispute** to the right of **Refresh**. Enter a synthetic customer name/ID, unique transaction ID, amount, currency, reason, received date and network deadline. Optionally select an existing agent and add a note. Successful creation refreshes the queue and totals, clears filters, and opens the new case; errors retain the form for correction.
+- New disputes start in `new` status with a generated `DSP-…` ID and deterministic mock risk score. Dates use your local timezone in the form and are stored in UTC; deadlines cannot precede receipt, but overdue cases can be entered. Creation supports USD, EUR, GBP, CAD and AUD, with amounts from 0.01 to 9,999,999.99 in the selected currency. Customer/transaction IDs accept letters, numbers, underscores and hyphens.
 - Search by customer name or transaction ID; combine status, reason, agent, and urgency filters. Click deadline, amount, or status headings to toggle sorting. Clear filters to return to all disputes.
 - Agent options include every current custom assignment plus the four predefined agents, independently of other filters. “Unassigned (no agent)” is distinct from an agent named `unassigned`. Failed queue requests hide rows/counts until a successful retry.
 - Click a dispute to open its details. Change status, choose an existing agent from the assignment dropdown (or “Unassigned (no agent)”), or add a plain-text note; each actual change creates an audit event. Agent choices include the four predefined agents and names already assigned to disputes. Click **Save assignment** to apply the selection. The linked transactions and risk signals are explicitly mock data.
@@ -62,7 +64,9 @@ Amounts are **integer minor units** (USD cents in the seed). Statuses: `new`, `i
 - `src/App.tsx`, `src/Detail.tsx`, `src/BulkAction.tsx`: queue, detail, and bulk flows.
 - `src/SummaryCards.tsx`, `src/api.ts`: global metrics and central API client.
 
-API: `GET /api/disputes`, `GET /api/disputes/:id`, `GET /api/summary`, `PATCH /api/disputes/:id`, `POST /api/disputes/:id/notes`, `POST /api/disputes/bulk-status`. Writes require JSON and `X-Dispute-Client: internal-web`; patches and each bulk item require `expected_updated_at`. These request guards **are not authentication**. A note append is transactional and does not overwrite existing notes.
+API: `GET /api/disputes`, `POST /api/disputes`, `GET /api/disputes/:id`, `GET /api/summary`, `PATCH /api/disputes/:id`, `POST /api/disputes/:id/notes`, `POST /api/disputes/bulk-status`. Writes require JSON and `X-Dispute-Client: internal-web`; patches and each bulk item require `expected_updated_at`. These request guards **are not authentication**. A note append is transactional and does not overwrite existing notes.
+
+`POST /api/disputes` accepts `transaction_id`, `customer_id`, `customer_name`, integer minor-unit `amount`, `currency`, `reason_code`, ISO timestamp `date_received` and `network_deadline`, plus optional `assigned_agent` and `notes`. It returns `201` with the detail payload and a `Location` header. The server generates ID, status, risk and timestamps, and derives the actor from the trusted identity. Duplicate transaction IDs return `409`; unknown agents and invalid/sensitive input return `400`. A SQLite immediate transaction allocates the ID and saves the case with its initial `status_change` creation event and optional assignment/note events; audit failure rolls back the case too.
 
 Queue responses include global `agents` filter options alongside the matching `disputes` and `total`. Use `assignment=assigned&agent=<name>` for a literal agent name or `assignment=unassigned` for null assignments; the original `agent=unassigned` shorthand is also accepted.
 
@@ -84,6 +88,7 @@ CI repeats these checks. Tests use isolated in-memory databases; they never touc
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Queue/read API    | Parameterized search/filter values, escaped LIKE wildcards, allowlisted sort fields, strict query validation, read permission checks, no-store responses.                                                    |
 | Detail/write API  | Server-derived actor, strict body schemas, immutable ID/amount fields, plain-text notes, sensitive-pattern rejection, optimistic concurrency, atomic state/event writes.                                     |
+| Creation API      | Existing write permissions/guards, strict field allowlist, positive integer minor units, date ordering, existing-agent validation, duplicate transaction rejection, and atomic creation/audit persistence. |
 | Bulk API          | Unique IDs, bounded batch size, per-record version checks and audit events, full rollback on stale/missing records.                                                                                          |
 | Summary           | Read permission checks, active-only upcoming/overdue counts, non-closed amount totals separated by currency.                                                                                                 |
 | Transport/storage | Helmet/CSP headers, no CORS opt-in, same-site write guards, hostname restrictions, 16 KB body cap, 300 API requests/minute and 60 writes/minute per IP, generic error responses, append-only event triggers. |

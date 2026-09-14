@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
 import type { DB } from "./database";
 import {
+  agents,
   HOUR,
   isActive,
   statusLabels,
   statuses,
+  type CreateDisputeInput,
   type Dispute,
   type DisputeDetail,
   type DisputeEvent,
@@ -100,6 +102,87 @@ function addEvent(
     detail,
     now,
   );
+}
+
+export function createDispute(
+  db: DB,
+  actor: string,
+  input: CreateDisputeInput,
+) {
+  return db
+    .transaction(() => {
+      if (
+        db
+          .prepare("SELECT 1 FROM disputes WHERE transaction_id = ?")
+          .get(input.transaction_id)
+      )
+        throw new RequestError(
+          409,
+          "A dispute already exists for this transaction.",
+        );
+      if (
+        input.assigned_agent &&
+        !agents.includes(input.assigned_agent) &&
+        !db
+          .prepare("SELECT 1 FROM disputes WHERE assigned_agent = ?")
+          .get(input.assigned_agent)
+      )
+        throw new RequestError(
+          400,
+          "Choose an existing agent or leave unassigned.",
+        );
+      const { next_id } = db
+        .prepare(
+          "SELECT COALESCE(MAX(CAST(SUBSTR(id, 5) AS INTEGER)), 1000) + 1 AS next_id FROM disputes",
+        )
+        .get() as { next_id: number };
+      if (next_id > 999999999999)
+        throw new RequestError(409, "Dispute ID limit reached.");
+      const now = new Date().toISOString();
+      const dispute: Dispute = {
+        ...input,
+        id: `DSP-${next_id}`,
+        status: "new",
+        risk_score: [...input.customer_id].reduce(
+          (score, char) => (score * 31 + char.charCodeAt(0)) % 101,
+          0,
+        ),
+        created_at: now,
+        updated_at: now,
+      };
+      db.prepare(
+        `INSERT INTO disputes (
+        id, transaction_id, customer_id, customer_name, amount, currency,
+        reason_code, status, date_received, network_deadline, assigned_agent,
+        risk_score, notes, created_at, updated_at
+      ) VALUES (
+        @id, @transaction_id, @customer_id, @customer_name, @amount, @currency,
+        @reason_code, @status, @date_received, @network_deadline, @assigned_agent,
+        @risk_score, @notes, @created_at, @updated_at
+      )`,
+      ).run(dispute);
+      addEvent(
+        db,
+        dispute.id,
+        "status_change",
+        actor,
+        "Dispute created with status New",
+        now,
+      );
+      if (input.assigned_agent)
+        addEvent(
+          db,
+          dispute.id,
+          "assigned",
+          actor,
+          `Assigned to ${input.assigned_agent}`,
+          now,
+        );
+      if (input.notes)
+        addEvent(db, dispute.id, "note_added", actor, input.notes, now);
+      return getDetail(db, dispute.id);
+    })
+    .immediate();
 }
 
 export function changeDispute(

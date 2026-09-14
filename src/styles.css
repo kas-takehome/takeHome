@@ -307,6 +307,12 @@ main {
   margin-bottom: 28px;
   gap: 20px;
 }
+.page-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
 .eyebrow {
   color: #858e9f;
   font-size: 9px;
@@ -1129,6 +1135,7 @@ tbody tr:hover {
   }
   .page-heading {
     align-items: flex-start;
+    flex-direction: column;
   }
   .page-heading p {
     line-height: 1.6;
@@ -1138,8 +1145,8 @@ tbody tr:hover {
     font-size: 24px;
   }
   .page-heading .button {
-    font-size: 0;
-    gap: 0;
+    font-size: 11px;
+    gap: 7px;
   }
   .filters {
     width: 100%;
@@ -1267,7 +1274,34 @@ input[type="checkbox"] {
   margin: 15px 0 0;
   font-size: 11px;
 }
+.create-modal {
+  width: 660px;
+}
+.create-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin: 24px 0 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.create-fields > div {
+  min-width: 0;
+}
+.create-wide {
+  grid-column: 1 / -1;
+}
+.create-modal .error-banner {
+  margin: 18px 0 0;
+}
 @media (max-width: 600px) {
+  .create-modal {
+    padding: 28px 18px;
+  }
+  .create-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .bulk-toolbar {
     flex-wrap: wrap;
   }

@@ -18,12 +18,14 @@ import {
   appendNote,
   bulkStatus,
   changeDispute,
+  createDispute,
   getDetail,
   getSummary,
   RequestError,
 } from "./disputes";
 import {
   agents,
+  currencies,
   reasons,
   statuses,
   urgency,
@@ -66,6 +68,46 @@ const updateInput = z
 const noteInput = z
   .object({ note: z.string().trim().min(1).max(4000).pipe(safeText) })
   .strict();
+const referenceInput = z
+  .string()
+  .trim()
+  .min(1)
+  .max(120)
+  .regex(/^[A-Za-z0-9_-]+$/)
+  .pipe(safeText);
+const creationDate = z
+  .string()
+  .datetime({ offset: true })
+  .transform((value) => new Date(value).toISOString());
+const createInput = z
+  .object({
+    transaction_id: referenceInput,
+    customer_id: referenceInput,
+    customer_name: z.string().trim().min(1).max(120).pipe(safeText),
+    amount: z.number().int().min(1).max(999999999),
+    currency: z.enum(currencies),
+    reason_code: z.enum(reasons),
+    date_received: creationDate,
+    network_deadline: creationDate,
+    assigned_agent: z
+      .string()
+      .trim()
+      .min(1)
+      .max(80)
+      .pipe(safeText)
+      .nullable()
+      .default(null),
+    notes: z.string().trim().max(4000).pipe(safeText).default(""),
+  })
+  .strict()
+  .refine(
+    (input) =>
+      Date.parse(input.network_deadline) >= Date.parse(input.date_received),
+    {
+      message: "Network deadline must be on or after the received date.",
+      path: ["network_deadline"],
+    },
+  );
 const bulkInput = z
   .object({
     disputes: z
@@ -192,6 +234,11 @@ export function createApp(db: DB, identity: RequestHandler = resolveActor) {
   });
   app.get("/api/summary", authorize("disputes:read"), (_req, res) => {
     res.json(getSummary(db));
+  });
+  app.post("/api/disputes", (req, res) => {
+    const actor = res.locals.actor as Actor;
+    const result = createDispute(db, actor.name, createInput.parse(req.body));
+    res.status(201).location(`/api/disputes/${result.dispute.id}`).json(result);
   });
   app.post("/api/disputes/bulk-status", (req, res) => {
     const actor = res.locals.actor as Actor;

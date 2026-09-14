@@ -13,6 +13,7 @@ import {
   Inbox,
   Layers,
   LayoutGrid,
+  Plus,
   RefreshCw,
   Search,
   ShieldCheck,
@@ -33,6 +34,7 @@ import { api } from "./api";
 import { Select, StatusBadge, UrgencyBadge } from "./components";
 import { date, initials, money } from "./format";
 import Detail from "./Detail";
+import CreateDispute from "./CreateDispute";
 import Modal from "./Modal";
 import BulkAction from "./BulkAction";
 import SummaryCards, { type SummaryFilter } from "./SummaryCards";
@@ -58,6 +60,7 @@ export default function App() {
   const [detailId, setDetailId] = useState(() => window.location.hash.slice(1));
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const [notification, setNotification] = useState("");
   const pageSize = 12;
   const filtersActive = Boolean(
@@ -82,11 +85,11 @@ export default function App() {
   }, [revision]);
   useEffect(() => {
     const timer = window.setInterval(() => {
-      if (!detailId && !bulkOpen && selected.size === 0)
+      if (!detailId && !bulkOpen && !createOpen && selected.size === 0)
         setRevision((value) => value + 1);
     }, 60_000);
     return () => window.clearInterval(timer);
-  }, [detailId, bulkOpen, selected.size]);
+  }, [detailId, bulkOpen, createOpen, selected.size]);
   useEffect(() => {
     setPage(1);
   }, [search, status, reason, agent, urgency, scope, sort, order]);
@@ -278,14 +281,23 @@ export default function App() {
               <h1>Dispute queue</h1>
               <p>Every dispute, one workspace. Stay ahead of your deadlines.</p>
             </div>
-            <button
-              className="button secondary"
-              onClick={() => setRevision((value) => value + 1)}
-              disabled={loading}
-            >
-              <RefreshCw size={14} className={loading ? "spin" : ""} />
-              Refresh
-            </button>
+            <div className="page-actions">
+              <button
+                className="button secondary"
+                onClick={() => setRevision((value) => value + 1)}
+                disabled={loading}
+              >
+                <RefreshCw size={14} className={loading ? "spin" : ""} />
+                Refresh
+              </button>
+              <button
+                className="button primary"
+                onClick={() => setCreateOpen(true)}
+              >
+                <Plus size={14} />
+                Add dispute
+              </button>
+            </div>
           </div>
           <SummaryCards
             summary={summary}
@@ -642,6 +654,20 @@ export default function App() {
           </footer>
         </main>
       </div>
+      {createOpen && (
+        <CreateDispute
+          agentOptions={agentOptions}
+          onClose={() => setCreateOpen(false)}
+          onSuccess={(id) => {
+            setCreateOpen(false);
+            clearFilters();
+            setPage(1);
+            setRevision((value) => value + 1);
+            setNotification(`${id} created. Changes audit logged.`);
+            window.location.hash = id;
+          }}
+        />
+      )}
       {detailId && (
         <Detail
           key={detailId}

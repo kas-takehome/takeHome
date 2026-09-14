@@ -23,6 +23,7 @@ export const agents = [
   "Priya Patel",
   "James Okafor",
 ];
+export const currencies = ["USD", "EUR", "GBP", "CAD", "AUD"] as const;
 export const statusLabels: Record<Status, string> = {
   new: "New",
   investigating: "Investigating",
@@ -57,6 +58,19 @@ export interface Dispute {
   created_at: string;
   updated_at: string;
 }
+export type CreateDisputeInput = Pick<
+  Dispute,
+  | "transaction_id"
+  | "customer_id"
+  | "customer_name"
+  | "amount"
+  | "currency"
+  | "reason_code"
+  | "date_received"
+  | "network_deadline"
+  | "assigned_agent"
+  | "notes"
+>;
 export type EventType =
   | "status_change"
   | "note_added"
